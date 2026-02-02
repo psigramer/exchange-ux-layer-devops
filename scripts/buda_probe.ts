@@ -35,12 +35,31 @@ function mustGetEnv(name: string): string {
   return v;
 }
 
-function sha256Hex(input: string) {
-  return crypto.createHash("sha256").update(input).digest("hex");
-}
-
 function hmacSha384Hex(secret: string, message: string) {
   return crypto.createHmac("sha384", secret).update(message).digest("hex");
+}
+
+let lastNonce = 0n;
+function nextNonceMicros(): string {
+  const now = BigInt(Date.now()) * 1000n; // micros
+  if (now <= lastNonce) lastNonce = lastNonce + 1n;
+  else lastNonce = now;
+  return lastNonce.toString();
+}
+
+function base64Body(rawBody: string): string {
+  if (!rawBody) return "";
+  return Buffer.from(rawBody, "utf8").toString("base64");
+}
+
+async function writeArtifact(path: string, content: string) {
+  await fs.mkdir("artifacts", { recursive: true });
+  await fs.writeFile(path, content, "utf8");
+}
+
+function redact(value: string, keep: number) {
+  if (!value) return value;
+  return value.length <= keep ? `${value}…` : `${value.slice(0, keep)}…`;
 }
 
 function redactHeaders(input: Headers): Record<string, string> {
@@ -150,24 +169,56 @@ async function main() {
   const path = "/api/v2/balances";
   const url = `${baseUrl}${path}`;
 
-  // Buda v2 signing pattern (generic): nonce + method + path + body hash (empty for GET)
-  // NOTE: If Buda uses a different canonical string, adjust accordingly.
-  // We keep verification as "best-effort" based on the signing string we used.
-  const nonce = Date.now().toString();
+   // --- Buda production signing (per Tech Lead) ---
+  const nonce = nextNonceMicros();
   const method = "GET";
-  const body = ""; // GET
-  const bodyHash = sha256Hex(body);
+  const body = ""; // GET has no body
+  const b64 = base64Body(body);
 
-  // canonical message (common pattern): nonce + method + path + bodyHash
-  const message = `${nonce}${method}${path}${bodyHash}`;
-  const signature = hmacSha384Hex(apiSecret, message);
+  // IMPORTANT: 4 components joined by single spaces.
+  // For GET with empty body, b64 === "" -> this creates the required double-space before nonce.
+  const canonical = `${method} ${path} ${b64} ${nonce}`;
+
+  const signature = hmacSha384Hex(apiSecret, canonical);
+
+  // Evidence artifacts (no secrets)
+  await writeArtifact("artifacts/canonical_string.txt", canonical);
+  await writeArtifact("artifacts/canonical_string.hex", Buffer.from(canonical, "utf8").toString("hex"));
+  await writeArtifact(
+    "artifacts/request_meta.json",
+    JSON.stringify(
+      {
+        method,
+        path_with_query: path,
+        nonce,
+        body_len: body.length,
+        signature_prefix: signature.slice(0, 12),
+      },
+      null,
+      2
+    )
+  );
 
   const reqHeaders: Record<string, string> = {
     "X-SBTC-APIKEY": apiKey,
     "X-SBTC-NONCE": nonce,
     "X-SBTC-SIGNATURE": signature,
-    "Content-Type": "application/json",
+    "Accept": "application/json",
   };
+
+  await writeArtifact(
+    "artifacts/request_headers_redacted.json",
+    JSON.stringify(
+      {
+        "X-SBTC-APIKEY": redact(apiKey, 4),
+        "X-SBTC-NONCE": nonce,
+        "X-SBTC-SIGNATURE": redact(signature, 12),
+        "Accept": "application/json",
+      },
+      null,
+      2
+    )
+  );
 
   const report: ProbeResult = {
     timestamp: new Date().toISOString(),
@@ -195,6 +246,21 @@ async function main() {
   }
 
   report.status_code = res.status;
+
+   const responseText = await res.clone().text();
+  await writeArtifact(
+    "artifacts/response_full.json",
+    JSON.stringify(
+      {
+        status: res.status,
+        statusText: res.statusText,
+        headers: Object.fromEntries(res.headers.entries()),
+        body: responseText,
+      },
+      null,
+      2
+    )
+  );
 
   // request id (if any)
   report.request_id = res.headers.get("x-request-id") || res.headers.get("request-id");
