@@ -1,0 +1,10 @@
+{
+  "name": "exchange-ux-layer-devops",
+  "private": true,
+  "scripts": {
+    "buda:probe": "tsx scripts/buda_probe.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}
