@@ -8,7 +8,6 @@
    - Produce artifact buda_probe_report.json
 */
 
-import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { signBuda } from "../src/buda/signer";
 import { nextNonceMicros } from "../src/buda/nonce";
@@ -35,23 +34,6 @@ function mustGetEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`Missing required env: ${name}`);
   return v;
-}
-
-function hmacSha384Hex(secret: string, message: string) {
-  return crypto.createHmac("sha384", secret).update(message).digest("hex");
-}
-
-let lastNonce = 0n;
-function nextNonceMicros(): string {
-  const now = BigInt(Date.now()) * 1000n; // micros
-  if (now <= lastNonce) lastNonce = lastNonce + 1n;
-  else lastNonce = now;
-  return lastNonce.toString();
-}
-
-function base64Body(rawBody: string): string {
-  if (!rawBody) return "";
-  return Buffer.from(rawBody, "utf8").toString("base64");
 }
 
 async function writeArtifact(path: string, content: string) {
@@ -167,29 +149,21 @@ async function main() {
   const apiKey = mustGetEnv("BUDA_API_KEY");
   const apiSecret = mustGetEnv("BUDA_API_SECRET");
 
-  const baseUrl = "https://www.buda.com";
-  const path = "/api/v2/balances";
-  const url = `${baseUrl}${path}`;
+    const baseUrl = "https://www.buda.com";
+  const pathWithQuery = "/api/v2/balances";
+  const url = `${baseUrl}${pathWithQuery}`;
 
-   // --- Buda production signing (per Tech Lead) ---
-const nonce = nextNonceMicros();
-const method = "GET";
-   const path = "/api/v2/balances";
-const body = "";
-  const b64 = base64Body(body);
+  const method = "GET";
+  const nonce = nextNonceMicros();
+  const body = ""; // GET
 
-  // IMPORTANT: 4 components joined by single spaces.
-  // For GET with empty body, b64 === "" -> this creates the required double-space before nonce.
-const components = [method, path];
-if (b64 && b64.length > 0) components.push(b64); // solo si hay body
-components.push(nonce);
-const { canonical, signature } = signBuda({
-  method,
-  pathWithQuery: path,
-  nonce,
-  body,
-  apiSecret,
-});
+  const { canonical, signature } = signBuda({
+    method,
+    pathWithQuery,
+    nonce,
+    body,
+    apiSecret,
+  });
 
   // Evidence artifacts (no secrets)
   await writeArtifact("artifacts/canonical_string.txt", canonical);
@@ -259,13 +233,14 @@ const { canonical, signature } = signBuda({
 
    const responseText = await res.clone().text();
   await writeArtifact(
-    "artifacts/response_full.json",
+    "artifacts/request_meta.json",
     JSON.stringify(
       {
-        status: res.status,
-        statusText: res.statusText,
-        headers: Object.fromEntries(res.headers.entries()),
-        body: responseText,
+        method,
+        path_with_query: pathWithQuery,
+        nonce,
+        body_len: body.length,
+        signature_prefix: signature.slice(0, 12),
       },
       null,
       2
