@@ -177,7 +177,10 @@ async function main() {
 
   // IMPORTANT: 4 components joined by single spaces.
   // For GET with empty body, b64 === "" -> this creates the required double-space before nonce.
-  const canonical = `${method} ${path} ${b64} ${nonce}`;
+const components = [method, path];
+if (b64 && b64.length > 0) components.push(b64); // solo si hay body
+components.push(nonce);
+const canonical = components.join(" ");
 
   const signature = hmacSha384Hex(apiSecret, canonical);
 
