@@ -40,3 +40,11 @@ jobs:
           name: buda_probe_report
           path: buda_probe_report.json
           retention-days: 7
+
+      - name: Upload probe evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buda_probe_evidence
+          path: artifacts/*
+          retention-days: 7
