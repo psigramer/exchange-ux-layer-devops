@@ -1,0 +1,43 @@
+name: buda_probe_readonly
+
+on:
+  push:
+    branches: [ "main" ]
+  schedule:
+    - cron: "0 7 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    environment: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Buda probe (read-only)
+        env:
+          BUDA_API_KEY: ${{ secrets.BUDA_API_KEY }}
+          BUDA_API_SECRET: ${{ secrets.BUDA_API_SECRET }}
+        run: |
+          npx tsx scripts/buda_probe.ts
+
+      - name: Upload probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: buda_probe_report
+          path: buda_probe_report.json
+          retention-days: 7
