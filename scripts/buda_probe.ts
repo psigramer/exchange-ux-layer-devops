@@ -10,6 +10,8 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { signBuda } from "../src/buda/signer";
+import { nextNonceMicros } from "../src/buda/nonce";
 
 type ProbeResult = {
   timestamp: string;
@@ -170,9 +172,10 @@ async function main() {
   const url = `${baseUrl}${path}`;
 
    // --- Buda production signing (per Tech Lead) ---
-  const nonce = nextNonceMicros();
-  const method = "GET";
-  const body = ""; // GET has no body
+const nonce = nextNonceMicros();
+const method = "GET";
+   const path = "/api/v2/balances";
+const body = "";
   const b64 = base64Body(body);
 
   // IMPORTANT: 4 components joined by single spaces.
@@ -180,9 +183,13 @@ async function main() {
 const components = [method, path];
 if (b64 && b64.length > 0) components.push(b64); // solo si hay body
 components.push(nonce);
-const canonical = components.join(" ");
-
-  const signature = hmacSha384Hex(apiSecret, canonical);
+const { canonical, signature } = signBuda({
+  method,
+  pathWithQuery: path,
+  nonce,
+  body,
+  apiSecret,
+});
 
   // Evidence artifacts (no secrets)
   await writeArtifact("artifacts/canonical_string.txt", canonical);
